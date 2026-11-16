@@ -1,0 +1,11 @@
+{
+	frankenphp {
+		num_threads {$NUM_THREADS:8}
+	}
+	auto_https off
+}
+
+:8080 {
+	root * /app/public
+	php_server
+}
