@@ -4,7 +4,7 @@ A PHP application served by FrankenPHP opens a PostgreSQL connection per request
 
 The cost is libpq's client-side PBKDF2: `scram_SaltedPassword()` calls `pg_hmac_init()` 4,096 times per connect, and on OpenSSL 3 each `HMAC_Init_ex(ctx, key, len, EVP_sha256(), NULL)` does an implicit algorithm fetch that takes process-wide locks. Separate processes never contend. Threads of one process do, so a multithreaded libpq client gets single-process connect throughput however many threads it runs.
 
-Everything below was measured on 16 November 2026 on an Apple M3 Max (Docker Desktop 29.4, 16 CPUs, aarch64), containers limited to 8 CPUs, PostgreSQL 16 in a container on the same Docker network.
+Everything below was measured on 16 November 2026 on an Apple M3 Max (OrbStack with Docker engine 29.4, 16 CPUs, aarch64), containers limited to 8 CPUs, PostgreSQL 16 in a container on the same Docker network.
 
 - FrankenPHP 1.13.5, PHP 8.4.27 ZTS, `dunglas/frankenphp:1-php8.4` (Debian 13), pdo_pgsql and pgsql built by `install-php-extensions`
 - libpq 17.12 (`libpq5 17.12-0+deb13u1`), OpenSSL 3.5.7 (`libssl3t64 3.5.7-1~deb13u3`)
@@ -45,7 +45,7 @@ Baseline with processes instead of threads, same image, same network, same 8-CPU
 | `evpmac`: `EVP_MAC_init(ctx, key, len, params{digest})` per iteration (libpq master since 2026-08) | 600 | **1,191** | **547** | 4,582 | 3,886 |
 | `fetched-md`: `HMAC_Init_ex` with an `EVP_MD_fetch()`ed digest    | 1,150 | 5,684 | 9,832 | 6,366 | 11,363 |
 | `legacy-reuse`: `HMAC_Init_ex(ctx, NULL, 0, NULL, NULL)` per iteration | 1,997 | 9,272 | 12,095 | 18,557 | 15,565 |
-| `evpmac-reuse`: `EVP_MAC_init(ctx, NULL, 0, NULL)` per iteration | 1,085 | [EVPMAC_REUSE_8] | [EVPMAC_REUSE_16] | [EVPMAC_REUSE_P8] | [EVPMAC_REUSE_P16] |
+| `evpmac-reuse`: `EVP_MAC_init(ctx, NULL, 0, NULL)` per iteration | 1,085 | 8,045 | 13,785 | 13,613 | 14,817 |
 
 The two patterns libpq uses are the two that do not scale with threads. Keeping the key and digest in the context between iterations removes the per-iteration fetch, is 2 to 4 times faster on one thread, and scales.
 
@@ -53,7 +53,12 @@ The two patterns libpq uses are the two that do not scale with threads. Keeping 
 
 `c/pqbench.c` opens and closes connections with libpq directly.
 
-[PQBENCH]
+| role           | 1 thread | 8 threads | 16 threads | 1 proc | 8 procs | 16 procs |
+|----------------|---------:|----------:|-----------:|-------:|--------:|---------:|
+| scram-sha-256  | 237      | **592**   | **268**    | 222    | 1,641   | 2,386    |
+| trust          | 595      | 1,882     | 3,814      | 559    | 2,640   | 3,594    |
+
+Connects per second, PostgreSQL 16 in a container on the same network. With SCRAM, 16 threads of one process open fewer connections per second than one thread; 16 processes open nine times more. With trust, threads and processes scale alike, so nothing else in the connect path contends.
 
 ## Reproduce
 
