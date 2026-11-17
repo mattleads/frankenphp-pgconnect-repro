@@ -60,6 +60,15 @@ The two patterns libpq uses are the two that do not scale with threads. Keeping 
 
 Connects per second, PostgreSQL 16 in a container on the same network. With SCRAM, 16 threads of one process open fewer connections per second than one thread; 16 processes open nine times more. With trust, threads and processes scale alike, so nothing else in the connect path contends.
 
+## 4. The fix, measured
+
+A patch for libpq (sent to pgsql-hackers, 17 November 2026) lets `pg_hmac_init()` reuse the key of the previous call, and `scram_SaltedPassword()` uses that from the second iteration on. `c/pqbench.c` linked against libpq built from PostgreSQL master (7fc2f04, OpenSSL 3.5.7), same server and limits as section 3:
+
+| libpq                                       | 1 thread | 8 threads | 16 threads | 1 proc | 8 procs | 16 procs |
+|---------------------------------------------|---------:|----------:|-----------:|-------:|--------:|---------:|
+| master (EVP_MAC_init per iteration)         | 271      | 1,096     | 707        | 281    | 1,910   | 2,479    |
+| master + patch (key kept in the context)    | 465      | 2,711     | 3,224      | 460    | 2,495   | 3,310    |
+
 ## Reproduce
 
 ```sh
